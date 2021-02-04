@@ -1,0 +1,1643 @@
+---
+title: "Spectroscopy and Chemometrics for Soil Texture Determination"
+author: "Christian L. Goueguel"
+date: "`r Sys.Date()`"
+output:
+  xaringan::moon_reader:
+    css: [default, default, default-fonts]
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+      ratio: 16:9
+---
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(xaringan)
+library(tidyverse)
+library(tidymodels)
+library(magrittr)
+library(doParallel)
+library(FactoMineR)
+library(factoextra)
+library(patchwork)
+library(kableExtra)
+library(soiltexture)
+library(caret)
+library(DT)
+```
+
+```{r include=FALSE}
+knitr::opts_chunk$set(fig.retina=2)
+```
+
+```{r include=FALSE}
+csv_files <- 
+  fs::dir_ls("pattern_data", regexp = "\\.csv$") %>%
+  map_dfr(data.table::fread, .id = "source") %>%
+  as_tibble()
+```
+
+```{r include=FALSE}
+soilData <- 
+  read_csv("soilData.csv") %>% 
+  distinct() %>%
+  print()
+```
+
+```{r include=FALSE}
+all_wavelength <-
+  csv_files %>%
+  select(-c(source:laser)) %>%
+  colnames()
+```
+
+```{r include=FALSE}
+data <- 
+  soilData %>%
+  select(sample_id, clay, sand, silt) %>%
+  drop_na()
+
+source("soilTextureClassification.R")
+
+textureData <- 
+  bind_rows(Fine_group, Medium_group, Coarse_group) %>% 
+  print()
+
+soilData %<>%
+  inner_join(
+    x = .,
+    y = textureData, 
+    by = c("sample_id", "clay", "sand", "silt")
+    )
+```
+
+```{r include=FALSE}
+ref_avg <- data.table::fread(file = "ref_avg.csv") %>% as_tibble()
+dat10mJ_avg <- data.table::fread(file = "dat10mJ_avg.csv") %>% as_tibble()
+dat12mJ_avg <- data.table::fread(file = "dat12mJ_avg.csv") %>% as_tibble()
+```
+
+```{r include=FALSE}
+dat10mJ_meta <- 
+  csv_files %>%
+  filter(source != "pattern_data/data0.csv", laser == "10mj") %>%
+  select(sample_id, spectra_id, points, laser) %>%
+  filter(points == 24)
+
+dat12mJ_meta <- 
+  csv_files %>%
+  filter(source != "pattern_data/data0.csv", laser == "12mj") %>%
+  select(sample_id, spectra_id, points, laser) %>%
+  filter(points == 24)
+```
+
+```{r include=FALSE}
+# 12 replicates at 10 mJ/pulse
+dat12_10mJ <- 
+  dat10mJ_avg %>%
+  anti_join(., dat10mJ_meta, by = "spectra_id") %>%
+  mutate(condition = "15mm_12_10mJ", .after = spectra_id) %>%
+  inner_join(distinct(select(csv_files, sample_id, spectra_id)), ., by = "spectra_id") %>%
+  inner_join(textureData, ., by = "sample_id")
+
+# 12 replicates at 12 mJ/pulse
+dat12_12mJ <- 
+  dat12mJ_avg %>%
+  anti_join(., dat12mJ_meta, by = "spectra_id") %>%
+  mutate(condition = "15mm_12_12mJ", .after = spectra_id) %>%
+  inner_join(distinct(select(csv_files, sample_id, spectra_id)), ., by = "spectra_id") %>%
+  inner_join(textureData, ., by = "sample_id")
+```
+
+```{r include=FALSE}
+data_full <- 
+  bind_rows(ref_avg, dat12_10mJ, dat12_12mJ) %>%
+  mutate(
+    condition = as_factor(condition), 
+    spectra_id = as_factor(spectra_id),
+    sample_id = as_factor(sample_id),
+    texture = as_factor(texture),
+    class = as_factor(class)
+    )
+
+data_norm <- 
+  data_full %>%
+  select(-where(is.factor), -clay, -sand, -silt) %>%
+  data.matrix() %>%
+  sweep(., MARGIN = 1, STATS = rowSums(.), FUN = "/") %>%
+  as_tibble() %>%
+  bind_cols(select(data_full, sample_id, clay, silt, sand, class, texture, spectra_id, condition), .) %>%
+  filter(condition %in% c("1mm_12_10mJ", "15mm_12_10mJ", "15mm_12_12mJ"))
+```
+
+
+class: left, middle
+# Outline
+
+--
+
+- **Objective**
+
+--
+
+- **Introduction**
+
+--
+
+- **Soil Samples**
+
+--
+
+- **Spectroscopic Measurements**
+
+--
+
+- **Partial Least Squares Regression**
+
+
+
+
+---
+class: left, middle
+# Objective
+
+In recent years there has been an increased interest in low-cost spectroscopic and chemometric methods for rapid soil particle size analysis. This study uses partial least squares regression (PLSR) model trained on LIBS<sup>[1]</sup> spectra of soil samples from across Southern Quebec (Canada) to estimate soil sand, silt and clay contents.
+
+.footnote[
+[1] Laser-Induced Breakdown Spectroscopy.
+]
+
+
+
+
+---
+class: left, middle
+# Introduction
+
+
+
+
+---
+class: left, top
+### Soil particle size
+
+- Texture influences soil nutrient and water holding capacity
+- Soil texture is classified according to soil particle size
+- The values given below pertain to the USDA Soil Taxonomy system
+
+
+.pull-left[
+<p style="margin-top:2cm;">
+```{r echo=FALSE, fig.align='center'}
+tibble('Soil separate' = c("Sand", "Silt", "Clay"),
+       'Diameter limit (mm)' = c("0.05 to 2.0", "0.002 to 0.05", "< 0.002")) %>%
+  knitr::kable(., format = 'html')
+```
+</p>
+]
+
+
+
+.pull-right[
+```{r echo=FALSE, fig.align='top', out.width='100%'}
+knitr::include_graphics('https://ftp.comet.ucar.edu/memory-stick/hydro/basic_int/runoff/media/graphics/soil_particle_diameter.jpg')
+```
+]
+
+
+
+
+---
+class: left, top
+Soil texture is typically determined in testing laboratories using conventional [**sieving**](https://youtu.be/8yKThLGkcuU?t=44), [**pipette**](https://youtu.be/U6qnDuZ0xn0?t=572), and [**hydrometer**](https://youtu.be/U6qnDuZ0xn0?t=584) methods, which provide the relative proportion of soil mineral particles.
+
+
+```{r echo=FALSE, fig.align='center', out.width='70%'}
+knitr::include_graphics('Hydrometer.png')
+```
+
+However, these procedures are **(i) laborious, (ii) time consuming, (iii) and expensive.**
+
+
+
+
+---
+class: left, middle
+# Soil Samples
+
+
+
+
+---
+class: left, top
+### The data set
+The whole dataset comprises 111 soil samples of LIBS analysis previously analyzed by the standard hydrometer method.
+
+```{r echo=FALSE}
+data_full %>%
+  filter(condition %in% "1mm_12_10mJ") %>%
+  select(sample_id, spectra_id, clay:silt, `199.3771616`:`199.5516666`) %>%
+  rename(spec_id = spectra_id) %>%
+  DT::datatable(fillContainer = FALSE, options = list(pageLength = 7))
+```
+
+
+
+
+---
+class: left, top
+
+- There are 12 soil textural classes, according to the USDA classification system 
+- A ternary diagram (or **soil texture triangle**) is used to report the relative proportions of soil separates
+
+```{r include=FALSE}
+s1 <- 
+  soilData %>% 
+    select(class) %>% 
+    group_by(class) %>% 
+    count(class) %>% 
+    rename(number_sample = n) %>%
+    ggplot() +
+    geom_bar(aes(x = class, fill = class, weight = number_sample)) +
+    geom_text(
+        aes(x = class, y = number_sample, label = number_sample), 
+        nudge_x = -0.1, 
+        nudge_y = 1
+    ) +
+    scale_fill_hue() +
+    labs(x = " ", y = "Number of samples") +
+    theme_grey(base_size = 14) +
+    theme_bw(base_size = 12) +
+    theme(
+        legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+
+s2 <-
+  soilData %>% 
+  select(texture, class) %>% 
+  group_by(texture, class) %>% 
+  count(class) %>% 
+  rename(number_sample = n) %>%
+  ggplot() +
+  geom_bar(aes(x = class, fill = texture, weight = number_sample)) +
+  ggthemes::scale_fill_economist() +
+  geom_text(
+    aes(x = class, y = number_sample, label = number_sample), 
+    colour  = "darkred", 
+    nudge_x = -0.1, 
+    nudge_y = 1
+    ) +
+  labs(x = " ", y = "Number of samples") +
+  facet_wrap(vars(texture), scales = "free_x") +
+  theme_bw(base_size = 12) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+```
+
+.pull-left[
+```{r echo=FALSE, fig.align='right', fig.height=7, fig.width=7}
+s1 / s2
+```
+]
+
+.pull-right[
+<p style="margin-bottom:5cm;">
+```{r echo=FALSE, fig.align='left', fig.height=13, fig.width=15}
+soilTern <- data.frame(CLAY = soilData$clay, SILT = soilData$silt, SAND = soilData$sand)
+geo <- TT.geo.get()
+kde.res <- TT.kde2d(geo = geo, tri.data = soilTern)
+TT.contour(x = kde.res,
+           geo = geo,
+           main = " ",
+           lwd = 3,
+           col = "red"
+           )
+TT.plot(class.sys = "USDA-NCSS.TT",
+        #class.p.bg.col = TRUE,
+        tri.data = soilTern,
+        z.name = NULL,
+        geo = geo,
+        grid.show = FALSE,
+        add = TRUE,
+        pch = 21,
+        col = "blue",
+        lwd = 3
+        )
+```
+</p>
+]
+
+
+
+
+---
+class: left, middle
+# Spectroscopic Measurements
+
+
+
+
+
+
+
+---
+class: left, top
+Typical LIBS spectrum of soil sample
+
+```{r echo=FALSE, fig.align='center', fig.width=15}
+spec_plot <- 
+  data_full %>%
+  filter(condition %in% "1mm_12_10mJ") %>%
+  select(sample_id, all_of(all_wavelength)) %>%
+  pivot_longer(
+    cols = !sample_id,
+    names_to = "wavelength", 
+    values_to = "intensity"
+    ) %>%
+  mutate(wavelength = as.numeric(wavelength)) %>%
+  filter(sample_id %in% "QC15-49") %>%
+  ggplot() +
+  geom_line(
+    aes(x = wavelength, y = intensity), 
+    color = "blue",
+    size = .5
+    ) +
+  labs(x = "Wavelength (nm)", y = "Intensity (a.u.)") +
+  theme_classic(base_size = 16)
+plotly::ggplotly(spec_plot)
+```
+
+
+
+
+---
+class: left, top
+Analytical area (1 and 200 mm<sup>2</sup>) and laser energy (10 and 12 mJ/pulse) were evaluated by spectral intensity. Figures below illustrate the averaged intensity obtained from soil textural classes.  
+
+```{r include=FALSE}
+spec_ref_class <- 
+  data.table::fread(file = "spec_ref_class.csv") %>% 
+  as_tibble()
+
+spec_12_10mJ_class <- 
+  data.table::fread(file = "spec_12_10mJ_class.csv") %>% 
+  as_tibble()
+
+spec_12_12mJ_class <- 
+  data.table::fread(file = "spec_12_12mJ_class.csv") %>% 
+  as_tibble()
+```
+
+```{r include=FALSE}
+sum_spec_ref_class <- 
+  data.table::fread(file ="sum_spec_ref_class.csv") %>%
+  as_tibble()
+
+sum_spec_12_10mJ_class <- 
+  data.table::fread(file = "sum_spec_12_10mJ_class.csv") %>% 
+  as_tibble()
+
+sum_spec_12_12mJ_class <- 
+  data.table::fread(file ="sum_spec_12_12mJ_class.csv") %>% 
+  as_tibble()
+```
+
+```{r include=FALSE}
+spec_class <- 
+  bind_rows(sum_spec_ref_class, sum_spec_12_10mJ_class, sum_spec_12_12mJ_class) %>%
+  as_tibble() %>%
+  mutate(
+    class = as_factor(class),
+    texture = as_factor(texture),
+    condition = as_factor(condition)
+    )
+```
+
+```{r include=FALSE}
+max_int <- 
+  spec_class %>%
+  filter(condition == "15mm_12_12mJ") %>%
+  select(intensity) %>%
+  max()
+```
+
+```{r include=FALSE}
+s4 <-
+  spec_class %>%
+  mutate(condition = factor(condition, levels = c("15mm_12_10mJ", "15mm_12_12mJ", "1mm_12_10mJ"))) %>%
+  group_by(condition) %>%
+  arrange(intensity, .by_group = TRUE) %>%
+  mutate(class = factor(class, levels = unique(class)),
+         condition = factor(condition, levels = c("1mm_12_10mJ", "15mm_12_10mJ", "15mm_12_12mJ"))
+         ) %>%
+  filter(condition == "1mm_12_10mJ") %>%
+  mutate(condition = "1 mm2, 10 mJ/pulse") %>%
+  ggplot() +
+  aes(x = class, y = intensity, group = texture, color = texture) +
+  geom_point() +
+  geom_line() +
+  ggsci::scale_color_lancet() +
+  facet_wrap(~condition) +
+  ylim(750, 1250) +
+  labs(x = " ", y = "Class-averaged intensity", color = "Soil texture") +
+  theme_bw(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+s5 <-
+  spec_class %>%
+  mutate(condition = factor(condition, levels = c("15mm_12_10mJ", "15mm_12_12mJ", "1mm_12_10mJ"))) %>%
+  group_by(condition) %>%
+  arrange(intensity, .by_group = TRUE) %>%
+  mutate(class = factor(class, levels = unique(class)),
+         condition = factor(condition, levels = c("1mm_12_10mJ", "15mm_12_10mJ", "15mm_12_12mJ"))
+         ) %>%
+  filter(condition == "15mm_12_10mJ") %>%
+  mutate(condition = "200 mm2, 10 mJ/pulse") %>%
+  ggplot() +
+  aes(x = class, y = intensity, group = texture, color = texture) +
+  geom_point() +
+  geom_line() +
+  ggsci::scale_color_lancet() +
+  facet_wrap(~condition) + 
+   ylim(750, 1250) +
+  labs(x = " ", y = "Class-averaged intensity", color = "Soil texture") +
+  theme_bw(base_size = 12) +
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+
+s6 <-
+  spec_class %>%
+  mutate(condition = factor(condition, levels = c("15mm_12_10mJ", "15mm_12_12mJ", "1mm_12_10mJ"))) %>%
+  group_by(condition) %>%
+  arrange(intensity, .by_group = TRUE) %>%
+  mutate(class = factor(class, levels = unique(class)),
+         condition = factor(condition, levels = c("1mm_12_10mJ", "15mm_12_10mJ", "15mm_12_12mJ"))
+         ) %>%
+  filter(condition == "15mm_12_12mJ") %>%
+  mutate(condition = "200 mm2, 12 mJ/pulse") %>%
+  ggplot() +
+  aes(x = class, y = intensity, group = texture, color = texture) +
+  geom_point() +
+  geom_line() +
+  ggsci::scale_color_lancet() +
+  facet_wrap(~condition) +
+  ylim(750, 1250) +
+  labs(x = " ", y = "Class-averaged intensity", color = "Soil texture") +
+  theme_bw(base_size = 12) +
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+```
+
+```{r echo=FALSE, fig.align='center', fig.height=6, fig.width=10}
+wrap_plots(s4, s5, s6, guides = 'collect')
+```
+
+**[The dependence of LIBS intensity on particle size](https://erdc-library.erdc.dren.mil/jspui/bitstream/11681/35374/1/ERDC-CRREL%20TR-20-1.pdf) can be exploited to determine soil texture instead of soil composition.**
+
+
+
+
+---
+class: left, top
+Principal component analysis (PCA) is performed on the spectral data at analytical area of 1 and 200 mm<sup>2</sup>.
+
+```{r include=FALSE}
+data_norm_re <-
+  data_norm %>%
+  filter(condition %in% c("1mm_12_10mJ", "15mm_12_10mJ"))
+```
+
+```{r include=FALSE}
+data_norm_re$condition %<>% 
+  str_replace_all("1mm_12_10mJ", "1 mm2") %>%
+  as_factor()
+
+data_norm_re$condition %<>% 
+  str_replace_all("15mm_12_10mJ", "200 mm2") %>%
+  as_factor()
+```
+
+```{r include=FALSE}
+set.seed(01)
+pca_mod <- 
+  data_norm_re %>%
+  select(-where(is.factor), -clay, -silt, -sand) %>%
+  PCA(scale.unit = FALSE, graph = FALSE)
+```
+
+```{r eval=FALSE, fig.height=4, include=FALSE}
+pca_mod %>%
+  fviz_eig(choice = "variance",
+           addlabels = TRUE,
+           ylim = c(0, 100),
+           geom = c("bar", "line"),
+           barfill = "#17456E",
+           barcolor = "black",
+           linecolor = "#FF0000",
+           ncp = 10
+           ) +
+  labs(title = "Scree plot", x = "Principal Component", y = "Percent Variance") +
+  theme_bw(base_size = 14)
+```
+
+```{r include=FALSE}
+# Grouped by measurements conditions
+p1 <- 
+  pca_mod %>%
+  fviz_pca_ind(axes = c(1, 2),
+               geom = "point",
+               pointshape = 21,
+               pointsize = 3,
+               label = "none",
+               fill.ind = data_norm_re$condition,
+               col.ind = "black",
+               palette = "jco",
+               legend.title = "Analytical Area",
+               repel = TRUE,
+               addEllipses = FALSE,
+               ellipse.level = 0.95,
+               ellipse.type = "t"
+               ) +
+  labs(title = "", x = "PC1 [91.6%]", y = "PC2 [3.5%]") +
+  theme_bw(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    axis.title.x = element_text(face = "bold"),
+    axis.title.y = element_text(face = "bold")
+    ) +
+  guides(fill = guide_legend(nrow = 2, byrow = TRUE))
+```
+
+```{r include=FALSE}
+# Grouped by soil texture
+p2 <- pca_mod %>%
+  fviz_pca_ind(axes = c(1, 2),
+               geom = "point",
+               pointshape = 21,
+               pointsize = 3,
+               label = "none",
+               fill.ind = data_norm_re$texture,
+               col.ind = "black",
+               palette = "lancet",
+               legend.title = "Texture",
+               repel = TRUE,
+               addEllipses = FALSE,
+               ellipse.level = 0.95,
+               ellipse.type = "t"
+               ) +
+  labs(title = "", x = "PC1 [91.6%]", y = "PC2 [3.5%]") +
+  theme_bw(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    axis.title.x = element_text(face = "bold"),
+    axis.title.y = element_text(face = "bold")
+    ) +
+  guides(fill = guide_legend(nrow = 2, byrow = TRUE))
+
+p3 <- pca_mod %>%
+  fviz_pca_ind(axes = c(1, 2),
+               geom = "point",
+               pointshape = 21,
+               pointsize = 3,
+               label = "none",
+               fill.ind = data_norm_re$class,
+               col.ind = "black",
+               legend.title = "Textural \nclasses",
+               repel = TRUE,
+               addEllipses = FALSE,
+               ellipse.level = 0.95,
+               ellipse.type = "t"
+               ) +
+  labs(title = "", x = "PC1 [91.6%]", y = "PC2 [3.5%]") +
+  theme_bw(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    axis.title.x = element_text(face = "bold"),
+    axis.title.y = element_text(face = "bold")
+    ) +
+  guides(fill = guide_legend(nrow = 4, byrow = TRUE))
+```
+
+```{r echo=FALSE, fig.height=7, fig.width=15}
+p1 | p2 | p3
+```
+
+
+
+
+---
+class: left, top
+
+Robust PCA (using ROBPCA algorithm<sup>[2]</sup>) is performed on the **spectra acquired on the 1 mm<sup>2</sup> area**. A diagnostic plot (outlier map) is produced. 
+
+```{r splitting, include=FALSE}
+set.seed(010)
+split_1 <-
+  data_norm %>%
+  filter(condition %in% "15mm_12_10mJ") %>%
+  initial_split(prop = .7, strata = sand, breaks = 4)
+```
+
+```{r TrainData and TestData, include=FALSE}
+TrainData <- 
+  training(split_1) %>% 
+  mutate(dataset = "Training set", .after = sample_id)
+
+TestData <- 
+  testing(split_1) %>% 
+  mutate(dataset = "Test set", .after = sample_id)
+```
+
+```{r spectraTrain and spectraTest, eval=FALSE, include=FALSE}
+spectraTrain <-
+  TrainData %>%
+  select(any_of(all_wavelength))
+
+spectraTest <-
+  TestData %>%
+  select(all_of(all_wavelength))
+```
+
+```{r TrainTest, include=FALSE}
+TrainTest <- bind_rows(TrainData, TestData)
+```
+
+```{r robpca, eval=FALSE, include=FALSE}
+robpca_mod <- 
+  TrainTest %>%
+  select(all_of(all_wavelength)) %>%
+  as.matrix() %>%
+  rospca::robpca(k = 0,
+                 kmax = 5,
+                 alpha = 0.75,
+                 h = NULL,
+                 mcd = FALSE,
+                 ndir = "all",
+                 skew = TRUE
+                )
+```
+
+```{r Extracting explained variance, eval=FALSE, include=FALSE}
+# Extracting explained variance
+j = length(robpca_mod$eigenvalues)
+robpca_eig <- matrix(nrow = 1, ncol = j)
+for (i in 1:j) {
+  robpca_eig[, i] <- robpca_mod[["eigenvalues"]][i] / sum(robpca_mod[["eigenvalues"]])
+}
+```
+
+```{r Scree, eval=FALSE, include=FALSE}
+# Scree plot
+tibble(
+  components = seq(1, j), 
+  variance = t(robpca_eig * 100)
+  ) %>%
+  ggplot() +
+  geom_col(
+    aes(x = components, y = variance), 
+    fill = "#17456E", 
+    colour = "black", 
+    position = "dodge"
+    ) +
+  geom_text(
+    aes(
+      x = components, 
+      y = variance, 
+      label = paste0(signif(variance, 3), "%")
+      ), 
+    nudge_x = 0.1, nudge_y = 4
+    ) +
+  geom_line(
+    aes(x = components, y = variance), 
+    colour = "red"
+    ) +
+  geom_point(
+    aes(x = components, y = variance), 
+    colour = "red"
+    ) +
+  ylim(0, 105) +
+  labs(
+    title = "Scree plot", 
+    x = "Principal Component",
+    y = "Percent Variance Explained"
+    )
+```
+
+```{r eval=FALSE, include=FALSE}
+robpca_res <-
+  TrainTest %>%
+  select(sample_id:texture) %>%
+  cbind(., pluck(robpca_mod, "scores")) %>%
+  as_tibble()
+```
+
+```{r include=FALSE}
+robpca_res <- read.csv("robpca_res.csv") %>% as_tibble()
+```
+
+.pull-left[
+```{r scores3Dplot, echo=FALSE}
+scores3Dplot <- 
+  robpca_res %>%
+  plotly::plot_ly(
+    x = ~PC1,
+    y = ~PC2,
+    z = ~PC3,
+    color = ~texture,
+    colors = c("#F8766D", "#00BA38", "#619CFF"),
+    text = ~sample_id,
+    hoverinfo = "text",
+    marker = list(symbol = 'circle', sizemode = 'diameter', size = 5)
+    ) %>% 
+  plotly::add_markers() %>% 
+  plotly::layout(
+    scene = list(xaxis = list(title = "PC1 [78.5%]"),
+    yaxis = list(title = "PC2 [15.1%]"),
+    zaxis = list(title = "PC3 [6.39%]"))
+    )
+scores3Dplot
+```
+]
+
+```{r scores, include=FALSE}
+# Scores scatter plot
+
+# Sand
+scoresplot1 <- 
+  robpca_res %>%
+  ggplot(
+    aes(
+      x = PC1, 
+      y = PC2, 
+      fill = sand
+      )
+    ) + 
+  geom_point(size = 3, alpha = 1, shape = 21) + 
+  geom_hline(
+    yintercept = 0, 
+    linetype = "dashed", 
+    color = "black", 
+    size = .5
+    ) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = .5) +
+  geom_rug(
+    stat = "identity", 
+    size = 0.3, 
+    alpha = 1/2, 
+    colour = "#08306b", 
+    position = "jitter"
+    ) +
+  labs(x = "PC1 [78.5%]", y = "PC2 [15.1%]", fill = "Sand (%)") +
+  theme(
+    legend.position = "right",
+    axis.title.x = element_text(face = "bold"), 
+    axis.title.y = element_text(face = "bold")
+    )
+
+# Silt
+scoresplot2 <- 
+  robpca_res %>%
+  ggplot(
+    aes(
+      x = PC1, 
+      y = PC2, 
+      fill = silt
+      )
+    ) + 
+  geom_point(size = 3, alpha = 1, shape = 21) + 
+  geom_hline(
+    yintercept = 0, 
+    linetype = "dashed", 
+    color = "black", 
+    size = .5
+    ) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = .5) +
+  geom_rug(
+    stat = "identity", 
+    size = 0.3, 
+    alpha = 1/2, 
+    colour = "#08306b", 
+    position = "jitter"
+    ) +
+  labs(x = "PC1 [78.5%]", y = "PC2 [15.1%]", fill = "Silt (%)") +
+  theme(
+    legend.position = "right",
+    axis.title.x = element_text(face = "bold"), 
+    axis.title.y = element_text(face = "bold")
+    )
+
+# Clay
+scoresplot3 <- 
+  robpca_res %>%
+  ggplot(
+    aes(
+      x = PC1, 
+      y = PC2, 
+      fill = clay
+      )
+    ) + 
+  geom_point(size = 3, alpha = 1, shape = 21) + 
+  geom_hline(
+    yintercept = 0, 
+    linetype = "dashed", 
+    color = "black", 
+    size = .5
+    ) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", size = .5) +
+  geom_rug(
+    stat = "identity", 
+    size = 0.3, 
+    alpha = 1/2, 
+    colour = "#08306b", 
+    position = "jitter"
+    ) +
+  labs(x = "PC1 [78.5%]", y = "PC2 [15.1%]", fill = "Clay (%)") +
+  theme(
+    legend.position = "right",
+    axis.title.x = element_text(face = "bold"), 
+    axis.title.y = element_text(face = "bold")
+    )
+```
+
+```{r temp_out, eval=FALSE, include=FALSE}
+temp_out <- 
+  TrainTest %>%
+  select(sample_id:texture) %>%
+  tibble(
+    sd = pluck(robpca_mod, "sd"), 
+    od = pluck(robpca_mod, "od"), 
+    flag_sd = pluck(robpca_mod, "flag.sd"), 
+    flag_od = pluck(robpca_mod, "flag.od"), 
+    flag_all = pluck(robpca_mod, "flag.all")
+    ) 
+```
+
+```{r include=FALSE}
+temp_out <- read_csv("temp_out.csv")
+```
+
+```{r outlier, include=FALSE}
+# Outlier map
+outplot <- 
+  temp_out %>%
+  ggplot(aes(x = sd, y = od, fill = texture, label = sample_id)) +
+  geom_point(size = 3, alpha = 1, shape = 21) +
+  #ggsci::scale_fill_lancet() +
+  # ggrepel::geom_label_repel(
+  #   data = filter(temp_out, od > 0.0008616881), 
+  #   show.legend = FALSE
+  #   ) +
+  geom_hline(
+    yintercept = 0.0008616881, 
+    linetype = "dashed", 
+    color = "black", 
+    size = .5
+    ) +
+  geom_vline(
+    xintercept = 4.395602, 
+    linetype = "dashed", 
+    color = "black", 
+    size = .5
+    ) +
+  geom_rug(
+    stat = "identity", 
+    size = 0.3, 
+    alpha = 1/2, 
+    colour = "#08306b", 
+    position = "jitter"
+    ) +
+  labs(
+    x = "Score distance", 
+    y = "Orthogonal distance", fill = " "
+    ) +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+
+.pull-right[
+<p style="margin-top:1cm;">
+```{r echo=FALSE, fig.align='center', fig.height=5, message=FALSE, warning=FALSE}
+plotly::ggplotly(outplot)
+```
+</p>
+]
+
+.footnote[
+[2] M. Hubert, P. Rousseeuw, T. Verdonck, Computational Statistics & Data Analysis, 53, 2009, 2264-2274.
+]
+
+
+
+
+
+---
+class: left, middle
+# Partial Least Squares Regression
+
+
+
+
+---
+class: left, top
+### Training/test splitting
+
+- Stratified sampling based on the sand variable
+- Training set (79 samples), independent test set (32 samples)
+
+```{r pca on train/test sets, include=FALSE}
+set.seed(2)
+pca_TrainTest <-
+  TrainTest %>%
+  select(all_of(all_wavelength)) %>%
+  PCA(scale.unit = FALSE, graph = FALSE)
+```
+
+```{r pca screeplot, eval=FALSE, include=FALSE}
+pca_TrainTest %>%
+  fviz_eig(choice = "variance",
+           addlabels = TRUE,
+           ylim = c(0, 100),
+           geom = c("bar", "line"),
+           barfill = "#17456E",
+           barcolor = "black",
+           linecolor = "#FF0000",
+           ncp = 10
+           ) +
+  labs(title = "Scree plot", x = "Principal Component", y = "Percent Variance") +
+  theme_bw(base_size = 14)
+```
+
+```{r include=FALSE}
+p9 <- 
+  pca_TrainTest %>%
+  fviz_pca_ind(axes = c(1, 2),
+               geom = "point",
+               pointsize = 3,
+               pointshape = 21,
+               label = "none",
+               fill.ind = TrainTest$dataset,
+               col.ind = "black",
+               palette = "aaas",
+               legend.title = " ",
+               repel = TRUE,
+               addEllipses = FALSE,
+               ellipse.level = 0.95,
+               ellipse.type = "t"
+               ) +
+  labs(title = "", x = "PC1", y = "PC2") +
+  theme_grey(base_size = 15) +
+  theme(legend.position = "top")
+```
+
+```{r include=FALSE}
+p12 <-
+  TrainTest %>%
+  ggpubr::ggdensity(
+    x = "sand",
+    add = "median", 
+    rug = TRUE,
+    color = "dataset",
+    fill = "dataset",
+    palette = "aaas",
+    legend = "none"
+    )
+
+p13 <-
+  TrainTest %>%
+  ggpubr::ggdensity(
+    x = "silt",
+    add = "median", 
+    rug = TRUE,
+    color = "dataset",
+    fill = "dataset",
+    palette = "aaas",
+    legend = "none"
+    )
+
+p14 <-
+  TrainTest %>%
+  ggpubr::ggdensity(
+    x = "clay",
+    add = "median", 
+    rug = TRUE,
+    color = "dataset",
+    fill = "dataset",
+    palette = "aaas",
+    legend = "none"
+    )
+```
+
+<p style="margin-bottom:5cm;">
+```{r echo=FALSE, fig.align='center', fig.height=6, fig.width=10}
+p9 | (ggpubr::ggpar(p12, xlim = c(0,100)) / ggpubr::ggpar(p13, xlim = c(0,100)) / ggpubr::ggpar(p14, xlim = c(0,100)))
+```
+</p>
+
+
+
+---
+class: left, top
+### Calibration
+
+```{r eval=FALSE, include=FALSE}
+# Extracting data from the PLS model
+ncomp_clay <- pls_clay$bestTune$ncomp
+ncomp_silt <- pls_silt$bestTune$ncomp
+ncomp_sand <- pls_sand$bestTune$ncomp
+
+t_scores_clay <- as_tibble(pls_clay$finalModel$scores[, 1:ncomp_clay])
+t_scores_silt <- as_tibble(pls_silt$finalModel$scores[, 1:ncomp_silt])
+t_scores_sand <- as_tibble(pls_sand$finalModel$scores[, 1:ncomp_sand])
+
+Err_matrix_clay <- as_tibble(pls_clay$finalModel$residuals)
+Err_matrix_silt <- as_tibble(pls_silt$finalModel$residuals)
+Err_matrix_sand <- as_tibble(pls_sand$finalModel$residuals)
+
+# Computing Q residuals
+Q_residuals_clay <- Err_matrix_clay^2 %>% rowSums() %>% as_tibble()
+Q_residuals_silt <- Err_matrix_silt^2 %>% rowSums() %>% as_tibble()
+Q_residuals_sand <- Err_matrix_sand^2 %>% rowSums() %>% as_tibble()
+
+# Computing T-squared statistics
+Tsq_hotelling_clay <- 
+  (t_scores_clay / apply(t_scores_clay, 1, sd))^2 %>%
+  rowSums() %>% 
+  as_tibble()
+
+Tsq_hotelling_silt <- 
+  (t_scores_silt / apply(t_scores_silt, 1, sd))^2 %>%
+  rowSums() %>% 
+  as_tibble()
+
+Tsq_hotelling_sand <- 
+  (t_scores_sand / apply(t_scores_sand, 1, sd))^2 %>%
+  rowSums() %>% 
+  as_tibble()
+```
+
+```{r eval=FALSE, include=FALSE}
+tmp_dist <- 
+  tibble(
+    sample_id = TrainData$sample_id,
+    Q_resid_clay = Q_residuals_clay$value,
+    Q_resid_silt = Q_residuals_silt$value,
+    Q_resid_sand = Q_residuals_sand$value,
+    Tsq_clay = Tsq_hotelling_clay$value,
+    Tsq_silt = Tsq_hotelling_silt$value,
+    Tsq_sand = Tsq_hotelling_sand$value,
+    out_clay = abs(Q_resid_clay) > quantile(abs(Q_resid_clay), .95),
+    out_silt = abs(Q_resid_silt) > quantile(abs(Q_resid_silt), .95),
+    out_sand = abs(Q_resid_sand) > quantile(abs(Q_resid_sand), .95)
+    )
+```
+
+```{r include=FALSE}
+# write.csv(tmp_dist, "tmp_dist.csv")
+tmp_dist <- 
+  read_csv("tmp_dist.csv") %>%
+  as_tibble()
+```
+
+```{r include=FALSE}
+# Computing a cutoff value for the T-squared statistics
+Tsq_cutoff_clay <- 19.71742
+  #(ncomp_clay*(ncol(spectraTrain)-1))/(ncol(spectraTrain)-ncomp_clay)*qf(p = .95, df1 = ncomp_clay, df2 = ncol(spectraTrain) - ncomp_clay)
+
+Tsq_cutoff_silt <- 16.94969
+  #(ncomp_silt * (ncol(spectraTrain) - 1)) / (ncol(spectraTrain) - ncomp_silt) * qf(p = .95, df1 = ncomp_silt, df2 = ncol(spectraTrain) - ncomp_silt)
+
+Tsq_cutoff_sand <- 19.71742
+  #(ncomp_sand * (ncol(spectraTrain) - 1)) / (ncol(spectraTrain) - ncomp_sand) * qf(p = .95, df1 = ncomp_sand, df2 = ncol(spectraTrain) - ncomp_sand)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Q residuals vs. Hotelling T-squared plot
+
+# Clay
+plot_7 <- 
+  tmp_dist %>%
+  ggplot(aes(x = Tsq_clay, y = Q_resid_clay, colour = out_clay, label = sample_id)) +
+  geom_point(size = 2, alpha = .5, show.legend = FALSE) +
+  geom_rug(color = "blue", alpha = .3) +
+  ggrepel::geom_label_repel(data = filter(tmp_dist, out_clay == 1), show.legend = FALSE) +
+  #geom_point(data = filter(tmp_dist, Tsq_clay >= Tsq_cutoff_clay), aes(x = Tsq_clay, y = Q_resid_clay, colour = "red", label = sample_id)) +
+  ggrepel::geom_label_repel(data = filter(tmp_dist, Tsq_clay >= Tsq_cutoff_clay), show.legend = FALSE) +
+  geom_vline(xintercept = Tsq_cutoff_clay, linetype = 2) +
+  geom_hline(yintercept = quantile(abs(tmp_dist$Q_resid_clay), .95), linetype = 2) +
+  scale_color_viridis_d(end = .4, direction = -1) +
+  labs(title = "Clay", x = "Hotelling's T-squared", y = "Q residuals") +
+  theme_bw(base_size = 14) +
+  theme(legend.position = "none")
+
+# Silt
+plot_8 <- 
+  tmp_dist %>%
+  ggplot(aes(x = Tsq_silt, y = Q_resid_silt, colour = out_silt, label = sample_id)) +
+  geom_point(size = 2, alpha = .5, show.legend = FALSE) +
+  geom_rug(color = "blue", alpha = .3) +
+  ggrepel::geom_label_repel(data = filter(tmp_dist, out_silt == 1), show.legend = FALSE) +
+  #geom_point(data = filter(tmp_dist, Tsq_silt >= Tsq_cutoff_silt), aes(x = Tsq_silt, y = Q_resid_silt, colour = "red", label = sample_id)) +
+  ggrepel::geom_label_repel(data = filter(tmp_dist, Tsq_silt >= Tsq_cutoff_silt), show.legend = FALSE) +
+  geom_vline(xintercept = Tsq_cutoff_silt, linetype = 2) +
+  geom_hline(yintercept = quantile(abs(tmp_dist$Q_resid_silt), .95), linetype = 2) +
+  scale_color_viridis_d(end = .4, direction = -1) +
+  labs(title = "Silt", x = "Hotelling's T-squared", y = "Q residuals") +
+  theme_bw(base_size = 14) +
+  theme(legend.position = "none")
+
+# Sand
+plot_9 <- 
+  tmp_dist %>%
+  ggplot(aes(x = Tsq_sand, y = Q_resid_sand, colour = out_sand, label = sample_id)) +
+  geom_point(size = 2, alpha = .5, show.legend = FALSE) +
+  geom_rug(color = "blue", alpha = .3) +
+  ggrepel::geom_label_repel(data = filter(tmp_dist, out_sand == 1), show.legend = FALSE) +
+  #geom_point(data = filter(tmp_dist, Tsq_sand >= Tsq_cutoff_sand), aes(x = Tsq_sand, y = Q_resid_sand, colour = "red", label = sample_id)) +
+  ggrepel::geom_label_repel(data = filter(tmp_dist, Tsq_sand >= Tsq_cutoff_sand), show.legend = FALSE) +
+  geom_vline(xintercept = Tsq_cutoff_sand, linetype = 2) +
+  geom_hline(yintercept = quantile(abs(tmp_dist$Q_resid_sand), .95), linetype = 2) +
+  scale_color_viridis_d(end = .4, direction = -1) +
+  labs(title = "Sand", x = "Hotelling's T-squared", y = "Q residuals") +
+  theme_bw(base_size = 14) +
+  theme(legend.position = "none")
+```
+
+- Determination of number of LVs: 5 repeats of 10-fold cross-validation
+- Trained individually for each variable (clay, silt, and sand percent)
+- Figures below show the Q residuals vs. Hotelling T<sup>2</sup> plot of the trained models
+
+```{r echo=FALSE, fig.height=5, fig.width=13}
+plot_7 | plot_8 | plot_9
+```
+
+
+
+
+---
+class: left, top
+### Prediction
+
+- Performance on the test set
+- Performance at analytical area of 1 and 200 mm<sup>2</sup> are compared
+
+```{r pls_Ctrl, eval=FALSE, include=FALSE}
+pls_Ctrl <- 
+  trainControl(
+    method = "repeatedcv",
+    number = 5,
+    repeats = 10,
+    search = "grid",
+    p = 0.7,
+    verboseIter = FALSE,
+    returnData = TRUE,
+    returnResamp = "final",
+    allowParallel = TRUE
+    )
+```
+
+```{r plsr modeling, eval=FALSE, include=FALSE}
+no_cores <- detectCores(logical = FALSE) - 1
+registerDoParallel(cores = no_cores)
+cl <- makeCluster(no_cores, type = "FORK")
+
+set.seed(5)
+pls_clay <- 
+  train(
+    spectraTrain,
+    TrainData$clay, 
+    method = "pls",
+    preProc = c("center"),
+    tuneLength = 20,
+    trControl = pls_Ctrl
+    )
+
+set.seed(5)
+pls_silt <- 
+  train(
+   spectraTrain, 
+   TrainData$silt, 
+   method = "pls",
+   preProc = c("center"),
+   tuneLength = 20,
+   trControl = pls_Ctrl
+   )
+
+set.seed(5)
+pls_sand <- 
+  train(
+   spectraTrain, 
+   TrainData$sand, 
+   method = "pls",
+   preProc = c("center"),
+   tuneLength = 20,
+   trControl = pls_Ctrl
+   )
+
+stopCluster(cl)
+```
+
+```{r eval=FALSE, include=FALSE}
+trainPerf_sand <- getTrainPerf(pls_sand)
+trainPerf_silt <- getTrainPerf(pls_silt)
+trainPerf_clay <- getTrainPerf(pls_clay)
+```
+
+```{r eval=FALSE, include=FALSE}
+tibble(
+  Parameters = c("LVs", "RMSE", "MAE", "Rsquared"),
+  Sand = c(pls_sand$bestTune$ncomp,
+           round(trainPerf_sand$TrainRMSE, 2), 
+           round(trainPerf_sand$TrainMAE, 2), 
+           round(trainPerf_sand$TrainRsquared, 2)
+           ),
+  Silt = c(pls_silt$bestTune$ncomp, 
+           round(trainPerf_silt$TrainRMSE, 2), 
+           round(trainPerf_silt$TrainMAE, 2), 
+           round(trainPerf_silt$TrainRsquared, 2)
+           ),
+  Clay = c(pls_clay$bestTune$ncomp, 
+           round(trainPerf_clay$TrainRMSE, 2), 
+           round(trainPerf_clay$TrainMAE, 2), 
+           round(trainPerf_clay$TrainRsquared, 2)
+           )
+    ) %>%
+  DT::datatable(fillContainer = FALSE, options = list(pageLength = 4))
+```
+
+```{r eval=FALSE, include=FALSE}
+predSand <- 
+  postResample(
+    predict(pls_sand, spectraTest), 
+    TestData$sand
+    )
+
+predSilt <- 
+  postResample(
+    predict(pls_silt, spectraTest),
+    TestData$silt
+    )
+
+predClay <- 
+  postResample(
+    predict(pls_clay, spectraTest),
+    TestData$clay
+    )
+```
+
+```{r eval=FALSE, include=FALSE}
+resPred <- tibble(
+  FOM  = c("RMSE","Rsquared","MAE"),
+  Sand = predSand,
+  Silt = predSilt,
+  Clay = predClay)
+```
+
+```{r eval=FALSE, include=FALSE}
+plsr_res <-
+  tibble(
+    Parameters = c("LVs", "RMSE", "Rsquared", "MAE"),
+    Sand = c(pls_sand$bestTune$ncomp, round(resPred$Sand, 2)),
+    Silt = c(pls_silt$bestTune$ncomp,round(resPred$Silt, 2)),
+    Clay = c(pls_clay$bestTune$ncomp, round(resPred$Clay, 2))
+    )
+```
+
+```{r include=FALSE}
+#write.csv(plsr_res, "plsr_res.csv")
+plsr_res1mm2 <- 
+  read.csv("plsr_res.csv") %>%
+  as_tibble() %>%
+  mutate(`Analytical area` = "1 mm2")
+
+plsr_res200mm2 <- 
+  read.csv("plsr_res200mm2.csv") %>%
+  as_tibble() %>%
+  mutate(`Analytical area` = "200 mm2")
+```
+
+```{r include=FALSE}
+plsr_res <- bind_rows(plsr_res1mm2, plsr_res200mm2)
+```
+
+.pull-left[
+<p style="margin-top:0cm;">
+```{r echo=FALSE, fig.align='right', fig.align='left'}
+plsr_res %>%
+  select(-X, -`Analytical area`) %>%
+  knitr::kable(., format = 'html', align = "lcccr", booktabs = T) %>%
+  group_rows("1 mm\u00B2 area", 1, 4) %>%
+  group_rows("200 mm\u00B2 area", 5, 8) %>%
+  kable_classic("striped", full_width = F)
+```
+</p>
+]
+
+```{r eval=FALSE, include=FALSE}
+tmp_pred <- 
+  tibble(
+    id = TestData$sample_id,
+    ref_clay = TestData$clay,
+    ref_silt = TestData$silt,
+    ref_sand = TestData$sand,
+    pred_clay = predict(pls_clay, spectraTest),
+    pred_silt = predict(pls_silt, spectraTest),
+    pred_sand = predict(pls_sand, spectraTest),
+    res_clay = ref_clay - pred_clay,
+    res_silt = ref_silt - pred_silt,
+    res_sand = ref_sand - pred_sand,
+    rstd_clay = (res_clay) / sd(res_clay),
+    rstd_silt = (res_silt) / sd(res_silt),
+    rstd_sand = (res_sand) / sd(res_sand),
+    out_clay = abs(res_clay) > quantile(abs(res_clay), .95),
+    out_silt = abs(res_silt) > quantile(abs(res_silt), .95),
+    out_sand = abs(res_sand) > quantile(abs(res_sand), .95)
+    )
+```
+
+```{r include=FALSE}
+# write.csv(tmp_pred, "tmp_pred200m2.csv")
+tmp_pred1mm2 <- read.csv("tmp_pred.csv")
+tmp_pred200mm2 <- read.csv("tmp_pred200m2.csv")
+```
+
+```{r calibration plot 1mm2, include=FALSE}
+# Clay
+plot_1 <- 
+  tmp_pred1mm2 %>%
+  ggplot(aes(x = ref_clay, y = pred_clay, colour = out_clay, label = id)) +
+  geom_point(size = 2, alpha = .7, show.legend = FALSE) +
+  geom_abline(slope = 1, color = "black") +
+  geom_smooth(
+    method = "lm", 
+    color = "red", 
+    linetype = "dashed",
+    size = .5, 
+    fill = "lightblue", 
+    se = TRUE, 
+    fullrange = FALSE, 
+    level = .95
+    ) +
+  scale_color_viridis_d(end = .3, direction = 1) +
+  # ggrepel::geom_label_repel(
+  #   data = filter(tmp_pred1mm2, out_clay == 1), 
+  #   show.legend = FALSE
+  #   ) +
+  labs(title = "Clay", x = "LIBS", y = "Hydrometer") +
+  theme_bw() +
+  theme(
+    legend.position = "none", 
+    axis.title.x = element_text(face = "bold"), 
+    axis.title.y = element_text(face = "bold")
+    )
+
+# Silt
+plot_2 <- 
+  tmp_pred1mm2 %>%
+  ggplot(aes(x = ref_silt, y = pred_silt, colour = out_silt, label = id)) +
+  geom_point(size = 2, alpha = .7, show.legend = FALSE) +
+  geom_abline(slope = 1, color = "black") +
+  geom_smooth(
+    method = "lm", 
+    color = "red", 
+    linetype = "dashed",
+    size = .5, 
+    fill = "lightblue", 
+    se = TRUE, 
+    fullrange = FALSE, 
+    level = .95
+    ) +
+  scale_color_viridis_d(end = .3, direction = 1) +
+  # ggrepel::geom_label_repel(
+  #   data = filter(tmp_pred1mm2, out_silt == 1), 
+  #   show.legend = FALSE
+  #   ) +
+  labs(title = "Silt", x = "LIBS", y = "Hydrometer") +
+  theme_bw() +
+  theme(
+    legend.position = "none", 
+    axis.title.x = element_text(face = "bold"), 
+    axis.title.y = element_text(face = "bold")
+    )
+
+# Sand
+plot_3 <- 
+  tmp_pred1mm2 %>%
+  ggplot(aes(x = ref_sand, y = pred_sand, colour = out_sand, label = id)) +
+  geom_point(size = 2, alpha = .7, show.legend = FALSE) +
+  geom_abline(slope = 1, color = "black") +
+  geom_smooth(
+    method = "lm", 
+    color = "red", 
+    linetype = "dashed",
+    size = .5, 
+    fill = "lightblue", 
+    se = TRUE, 
+    fullrange = FALSE, 
+    level = .95
+    ) +
+  scale_color_viridis_d(end = .3, direction = 1) +
+  # ggrepel::geom_label_repel(
+  #   data = filter(tmp_pred1mm2, out_sand == 1), 
+  #   show.legend = FALSE
+  #   ) +
+  labs(title = "Sand", x = "LIBS", y = "Hydrometer") +
+  theme_bw() +
+  theme(
+    legend.position = "none", 
+    axis.title.x = element_text(face = "bold"), 
+    axis.title.y = element_text(face = "bold")
+    )
+```
+
+```{r calibration plot 200mm2, include=FALSE}
+# Clay
+plot_4 <- 
+  tmp_pred200mm2 %>%
+  ggplot(aes(x = ref_clay, y = pred_clay, colour = out_clay, label = id)) +
+  geom_point(size = 2, alpha = .7, show.legend = FALSE) +
+  geom_abline(slope = 1, color = "black") +
+  geom_smooth(
+    method = "lm", 
+    color = "red", 
+    linetype = "dashed",
+    size = .5, 
+    fill = "lightblue", 
+    se = TRUE, 
+    fullrange = FALSE, 
+    level = .95
+    ) +
+  scale_color_viridis_d(end = .3, direction = 1) +
+  ggrepel::geom_label_repel(
+    data = filter(tmp_pred200mm2, out_clay == 1), 
+    show.legend = FALSE
+    ) +
+  labs(title = "Clay", x = "LIBS", y = "Hydrometer") +
+  theme_bw() +
+  theme(
+    legend.position = "none", 
+    axis.title.x = element_text(face = "bold"), 
+    axis.title.y = element_text(face = "bold")
+    )
+
+# Silt
+plot_5 <- 
+  tmp_pred200mm2 %>%
+  ggplot(aes(x = ref_silt, y = pred_silt, colour = out_silt, label = id)) +
+  geom_point(size = 2, alpha = .7, show.legend = FALSE) +
+  geom_abline(slope = 1, color = "black") +
+  geom_smooth(
+    method = "lm", 
+    color = "red", 
+    linetype = "dashed",
+    size = .5, 
+    fill = "lightblue", 
+    se = TRUE, 
+    fullrange = FALSE, 
+    level = .95
+    ) +
+  scale_color_viridis_d(end = .3, direction = 1) +
+  ggrepel::geom_label_repel(
+    data = filter(tmp_pred200mm2, out_silt == 1), 
+    show.legend = FALSE
+    ) +
+  labs(title = "Silt", x = "LIBS", y = "Hydrometer") +
+  theme_bw() +
+  theme(
+    legend.position = "none", 
+    axis.title.x = element_text(face = "bold"), 
+    axis.title.y = element_text(face = "bold")
+    )
+
+# Sand
+plot_6 <- 
+  tmp_pred200mm2 %>%
+  ggplot(aes(x = ref_sand, y = pred_sand, colour = out_sand, label = id)) +
+  geom_point(size = 2, alpha = .7, show.legend = FALSE) +
+  geom_abline(slope = 1, color = "black") +
+  geom_smooth(
+    method = "lm", 
+    color = "red", 
+    linetype = "dashed",
+    size = .5, 
+    fill = "lightblue", 
+    se = TRUE, 
+    fullrange = FALSE, 
+    level = .95
+    ) +
+  scale_color_viridis_d(end = .3, direction = 1) +
+  ggrepel::geom_label_repel(
+    data = filter(tmp_pred200mm2, out_sand == 1), 
+    show.legend = FALSE
+    ) +
+  labs(title = "Sand", x = "LIBS", y = "Hydrometer") +
+  theme_bw() +
+  theme(
+    legend.position = "none", 
+    axis.title.x = element_text(face = "bold"), 
+    axis.title.y = element_text(face = "bold")
+    )
+```
+
+```{r residual plot 1mm2, eval=FALSE, include=FALSE}
+# Clay
+plot_7 <- 
+  tmp_pred1mm2 %>% 
+  ggplot(aes(x = pred_clay, y = rstd_clay, colour = out_clay, label = id)) +
+  geom_point(size = 2, alpha = .7, show.legend = FALSE) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  geom_rug(color = "blue", alpha = .5, sides = "l") +
+  scale_color_viridis_d(end = .3, direction = 1) +
+  ggrepel::geom_label_repel(
+    data = filter(tmp_pred, out_clay == 1), 
+    show.legend = FALSE
+    ) +
+  labs(x = "LIBS", y = "Standardized residual") +
+  theme_bw() +
+  theme(
+    legend.position = "none", 
+    axis.title.x = element_text(face = "bold"), 
+    axis.title.y = element_text(face = "bold")
+    )
+
+# Silt
+plot_8 <- 
+  tmp_pred1mm2 %>% 
+  ggplot(aes(x = pred_silt, y = rstd_silt, colour = out_silt, label = id)) +
+  geom_point(size = 2, alpha = .7, show.legend = FALSE) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  geom_rug(color = "blue", alpha = .5, sides = "l") +
+  scale_color_viridis_d(end = .3, direction = 1) +
+  ggrepel::geom_label_repel(
+    data = filter(tmp_pred, out_silt == 1), 
+    show.legend = FALSE
+    ) +
+  labs(x = "LIBS", y = "Standardized residual") +
+  theme_bw() +
+  theme(
+    legend.position = "none", 
+    axis.title.x = element_text(face = "bold"), 
+    axis.title.y = element_text(face = "bold")
+    )
+
+# Sand
+plot_9 <- 
+  tmp_pred1mm2 %>% 
+  ggplot(aes(x = pred_sand, y = rstd_sand, colour = out_sand, label = id)) +
+  geom_point(size = 2, alpha = .7, show.legend = FALSE) +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  geom_rug(color = "blue", alpha = .5, sides = "l") +
+  scale_color_viridis_d(end = .3, direction = 1) +
+  ggrepel::geom_label_repel(
+    data = filter(tmp_pred, out_sand == 1), 
+    show.legend = FALSE
+    ) +
+  labs(x = "LIBS", y = "Standardized residual") +
+  theme_bw() +
+  theme(
+    legend.position = "none", 
+    axis.title.x = element_text(face = "bold"), 
+    axis.title.y = element_text(face = "bold")
+    )
+```
+
+.pull-right[
+```{r echo=FALSE, fig.align='left', fig.height=7.5, fig.width=9, message=FALSE, warning=FALSE}
+(plot_1 | plot_2 | plot_3) / (p1 | p2)
+```
+]
+
+
+
+
+---
+class: left, top
+# Conclusions
+
+- Optical spectroscopy (e.g. LIBS) combined with chemometrics is a viable alternative to conventional methods for soils texture analysis
+- PCA on the LIBS spectra reveals potential for classification of soil into three main groups of coarse, medium and fine textured soils.
+- Partial least squares regression of LIBS spectra predict soil minerals fraction reliably
+- Careful optimization of measurement parameters is required
+
+
+
+---
+class: center, middle
+# Thank you
+
+
+
+
