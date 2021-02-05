@@ -185,7 +185,7 @@ class: left, top
 ### Soil particle size
 
 - Texture influences soil nutrient and water holding capacity
-- Soil texture is classified according to soil particle size
+- Soil texture is classified according to the particle size of the soil
 - The values given below pertain to the USDA Soil Taxonomy system
 
 
@@ -513,7 +513,7 @@ wrap_plots(s4, s5, s6, guides = 'collect')
 
 ---
 class: left, top
-Principal component analysis (PCA) is performed on the spectral data at analytical area of 1 and 200 mm<sup>2</sup>.
+Principal component analysis (PCA) is performed from LIBS spectra acquired over the analytical area of 1 and 200 mm<sup>2</sup>.
 
 ```{r include=FALSE}
 data_norm_re <-
@@ -565,6 +565,7 @@ p1 <-
                label = "none",
                fill.ind = data_norm_re$condition,
                col.ind = "black",
+               invisible = "quali",
                palette = "jco",
                legend.title = "Analytical Area",
                repel = TRUE,
@@ -592,6 +593,7 @@ p2 <- pca_mod %>%
                label = "none",
                fill.ind = data_norm_re$texture,
                col.ind = "black",
+               invisible = "quali",
                palette = "lancet",
                legend.title = "Texture",
                repel = TRUE,
@@ -616,6 +618,7 @@ p3 <- pca_mod %>%
                label = "none",
                fill.ind = data_norm_re$class,
                col.ind = "black",
+               invisible = "quali",
                legend.title = "Textural \nclasses",
                repel = TRUE,
                addEllipses = FALSE,
@@ -642,7 +645,7 @@ p1 | p2 | p3
 ---
 class: left, top
 
-Robust PCA (using ROBPCA algorithm<sup>[2]</sup>) is performed on the **spectra acquired on the 1 mm<sup>2</sup> area**. A diagnostic plot (outlier map) is produced. 
+Robust PCA (using ROBPCA algorithm<sup>[2]</sup>) is performed on the **LIBS spectra acquired over the analytical area of 1 mm<sup>2</sup>**. A diagnostic plot (outlier map) is produced. 
 
 ```{r splitting, include=FALSE}
 set.seed(010)
@@ -991,6 +994,7 @@ p9 <-
                label = "none",
                fill.ind = TrainTest$dataset,
                col.ind = "black",
+               invisible = "quali",
                palette = "aaas",
                legend.title = " ",
                repel = TRUE,
@@ -1192,7 +1196,7 @@ class: left, top
 ### Prediction
 
 - Performance on the test set
-- Performance at analytical area of 1 and 200 mm<sup>2</sup> are compared
+- The analytical area of 1 and 200 mm<sup>2</sup> are compared
 
 ```{r pls_Ctrl, eval=FALSE, include=FALSE}
 pls_Ctrl <- 
@@ -1627,9 +1631,9 @@ plot_9 <-
 class: left, top
 # Conclusions
 
-- Optical spectroscopy (e.g. LIBS) combined with chemometrics is a viable alternative to conventional methods for soils texture analysis
-- PCA on the LIBS spectra reveals potential for classification of soil into three main groups of coarse, medium and fine textured soils.
-- Partial least squares regression of LIBS spectra predict soil minerals fraction reliably
+- Optical spectroscopy (e.g. LIBS) combined with chemometrics is a viable alternative to conventional methods of soil texture analysis
+- PCA on LIBS spectra reveals the potential for classifying soil into three main groups of a coarse, medium, and fine-textured soil
+- PLS regression from LIBS spectra can reliably predict the fraction of soil minerals
 - Careful optimization of measurement parameters is required
 
 
