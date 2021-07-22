@@ -1,0 +1,183 @@
+---
+title: "Direct determination of soil texture using laser-induced breakdown spectroscopy and multivariate linear regressions"
+subtitle: "Christian L. Goueguel, Logiag Inc."
+author: "NASLIBS National Meeting, Palm Springs, CA"
+date: "October 11, 2020<br><br>"
+output:
+  xaringan::moon_reader:
+    css: [default, default-fonts, my-theme.css]
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+      ratio: 16:9
+---
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(xaringan)
+library(tidyverse)
+library(tidymodels)
+library(magrittr)
+library(doParallel)
+library(FactoMineR)
+library(factoextra)
+library(patchwork)
+library(kableExtra)
+library(soiltexture)
+library(caret)
+library(DT)
+```
+
+```{r include=FALSE}
+knitr::opts_chunk$set(fig.retina=2)
+```
+
+class: left, middle
+# Outline
+
+--
+
+- **Objective**
+
+--
+
+- **Introduction**
+
+--
+
+- **Soil Samples**
+
+--
+
+- **Spectroscopic Measurements**
+
+--
+
+- **PLSR Modeling**
+
+--
+
+- **Elastic net Modeling**
+
+--
+
+- **Conclusions**
+
+
+---
+class: left, middle
+# Objective
+
+In recent years there has been an increased interest in low-cost spectroscopic and chemometric methods for rapid soil particle size analysis. This study uses partial least squares regression (PLSR) model trained on LIBS<sup>[1]</sup> spectra of soil samples from across Southern Quebec (Canada) to estimate soil sand, silt and clay contents.
+
+.footnote[
+[1] Laser-Induced Breakdown Spectroscopy.
+]
+
+
+
+
+---
+class: left, middle
+# Introduction
+
+
+
+
+---
+class: left, top
+### Soil particle size
+
+- Texture influences soil nutrient and water holding capacity
+- Soil texture is classified according to the particle size of the soil
+- The values given below pertain to the USDA Soil Taxonomy system
+
+
+.pull-left[
+<p style="margin-top:2cm;">
+```{r echo=FALSE, fig.align='center'}
+tibble('Soil separate' = c("Sand", "Silt", "Clay"),
+       'Diameter limit (mm)' = c("0.05 to 2.0", "0.002 to 0.05", "< 0.002")) %>%
+  knitr::kable(., format = 'html')
+```
+</p>
+]
+
+
+
+.pull-right[
+```{r echo=FALSE, fig.align='top', out.width='100%'}
+knitr::include_graphics('https://ftp.comet.ucar.edu/memory-stick/hydro/basic_int/runoff/media/graphics/soil_particle_diameter.jpg')
+```
+]
+
+
+
+
+---
+class: left, top
+Soil texture is typically determined in testing laboratories using conventional [**sieving**](https://youtu.be/8yKThLGkcuU?t=44), [**pipette**](https://youtu.be/U6qnDuZ0xn0?t=572), and [**hydrometer**](https://youtu.be/U6qnDuZ0xn0?t=584) methods, which provide the relative proportion of soil mineral particles.
+
+
+
+However, these procedures are **(i) laborious, (ii) time consuming, (iii) and expensive.**
+
+---
+class: left, top
+### Soil particle size
+
+---
+class: left, top
+### Soil particle size
+
+---
+class: left, top
+### Soil particle size
+
+---
+class: left, top
+### Soil particle size
+
+---
+class: left, top
+### Soil particle size
+
+---
+class: left, top
+### Soil particle size
+
+---
+class: left, top
+### Soil particle size
+
+---
+class: left, top
+### Soil particle size
+
+---
+class: left, top
+### Soil particle size
+
+---
+class: left, top
+### Soil particle size
+
+
+---
+class: left, top
+### Soil particle size
+
+---
+class: left, top
+### Soil particle size
+
+
+---
+class: left, top
+### Soil particle size
+---
+class: left, top
+### Soil particle size
+

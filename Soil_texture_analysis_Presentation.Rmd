@@ -1,10 +1,11 @@
 ---
-title: "Direct determination of soil texture using laser-induced breakdown spectroscopy and multivariate linear regression"
-author: "Christian L. Goueguel"
-date: "`r Sys.Date()`"
+title: "Direct determination of soil texture using laser-induced breakdown spectroscopy and multivariate linear regressions"
+subtitle: "Christian L. Goueguel, Logiag Inc."
+author: "NASLIBS National Meeting, Palm Springs, CA"
+date: "October 11, 2020<br><br>"
 output:
   xaringan::moon_reader:
-    css: [default, default, default-fonts]
+    css: [default, default-fonts, my-theme.css]
     lib_dir: libs
     nature:
       highlightStyle: github
@@ -149,7 +150,15 @@ class: left, middle
 
 --
 
-- **Partial Least Squares Regression**
+- **PLSR Modeling**
+
+--
+
+- **Elastic net Modeling**
+
+--
+
+- **Conclusions**
 
 
 
