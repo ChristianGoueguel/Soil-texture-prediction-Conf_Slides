@@ -2,7 +2,7 @@
 title: "Direct determination of soil texture using laser-induced breakdown spectroscopy and multivariate linear regressions"
 subtitle: "Christian L. Goueguel, Logiag Inc."
 author: "NASLIBS National Meeting, Palm Springs, CA"
-date: "October 11, 2020<br><br>"
+date: "October 11, 2020"
 output:
   xaringan::moon_reader:
     css: [default, default-fonts, my-theme.css]
@@ -159,7 +159,6 @@ class: left, middle
 --
 
 - **Conclusions**
-
 
 
 
